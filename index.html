@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Amendment Watch · Cobblr Labs</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="page">
+    <header class="mast">
+      <p class="kicker">Cobblr Labs</p>
+      <div class="title-row">
+        <h1>Amendment Watch</h1>
+        <button id="refresh" type="button">Refresh</button>
+      </div>
+      <p class="subtitle">XRPL mainnet · live from public feature API</p>
+      <p id="status" class="status" aria-live="polite">Reading the ledger…</p>
+    </header>
+
+    <main id="app">
+      <p class="loading">Loading amendment status…</p>
+    </main>
+
+    <footer>
+      <p>Independent Cobblr Labs experiment · not affiliated with Ripple · not financial advice</p>
+      <p>Silence is not a yes. Only explicit votes from trusted validators count toward majority.</p>
+    </footer>
+  </div>
+  <noscript>
+    <p class="noscript">This page needs JavaScript to read the public XRPL feature API.</p>
+  </noscript>
+  <script src="app.js"></script>
+</body>
+</html>
