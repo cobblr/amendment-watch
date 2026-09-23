@@ -1,10 +1,12 @@
 # Amendment Watch
 
-A one-page lab card for XRPL mainnet amendment status. It reads the public `feature` method and, when that call works, cross-checks majority times against the `Amendments` ledger entry. No wallet, no backend, no secrets.
+A one-page lab notebook for XRPL mainnet amendment status. When something is in majority, the page is a receipt on ruled paper: amendment name, countdown, majority time, estimated enable, and a stamp for the source ledger. Voting, parked names, and a short name-watch of already-enabled amendments sit in folds under that receipt. If nothing is in majority, the page says so instead of inventing a countdown.
+
+It reads the public `feature` method and, when that call works, cross-checks majority times against the `Amendments` ledger entry. No wallet, no backend, no secrets, no build step.
 
 Independent Cobblr Labs experiment. Not affiliated with Ripple. Not financial advice.
 
-This repository is the home of the card. `index.html` is at the repository root.
+`index.html` is at the repository root. Serve the folder; nothing to install.
 
 ## Open it
 
@@ -16,9 +18,9 @@ python3 -m http.server 8080
 
 Then open [http://127.0.0.1:8080/](http://127.0.0.1:8080/).
 
-Double-clicking `index.html` can work, but some browsers block API calls from `file://` pages. If the card says it could not reach the cluster, use the command above.
+Double-clicking `index.html` can work, but some browsers block API calls from `file://` pages. If the page says it could not reach the cluster, use the command above.
 
-The page refreshes on its own about every 60 seconds. The Refresh button fetches immediately.
+The page refreshes on its own about every 60 seconds. The refresh control fetches immediately.
 
 ## Endpoint
 
@@ -39,12 +41,16 @@ Both HTTPS hosts answered with `Access-Control-Allow-Origin: *` when this page w
 
 A second call, `ledger_entry` with `amendments: true` on the validated ledger, checks that each `majority` value matches `Majorities[].Majority.CloseTime`.
 
-## What the card shows
+## What the page shows
 
-- **In majority** — `enabled` is false and `majority` is set. This is the screenshot row. Names starting with Batch, Permission, or Delegation get a watch mark.
-- **Voting** — not enabled, no majority, and `count` greater than 0.
-- **Quiet / parked** — collapsed. Other known amendments that are not enabled, with a missing or zero count. Enabled amendments are not dumped here.
-- **Enabled · name watch** — enabled amendments whose names match Batch, Permission, Credentials, or Delegation. The API does not include an enable time, so this is a name filter, not a chronology.
+- **Hero** — one amendment in majority (`enabled` false and `majority` set). Batch, Permission, or Delegation names come first; otherwise the earliest majority. Large name, countdown (`6d 0h 15m`), Chicago and UTC times. Further amendments in majority are shorter lines under that receipt.
+- **Empty** — nothing is in majority. A short note, no countdown.
+- **Stamp** — `cobblr labs · host · ledger N · refreshed …`
+- **Arithmetic** — collapsed Ripple-epoch math for each majority amendment.
+- **Caveats** — collapsed. The 80% / 14-day rule, flag ledgers, and missing vote counts.
+- **Voting** — collapsed. Not enabled, no majority, `count` greater than 0.
+- **Quiet / parked** — collapsed. Other known amendments that are not enabled, with a missing or zero count. Enabled amendments are not listed here.
+- **Enabled** — collapsed name watch. Enabled amendments whose names match Batch, Permission, Credentials, or Delegation. The API does not include an enable time.
 
 ## Time math
 
@@ -70,7 +76,7 @@ estimate = unix + 14 * 24 * 3600
          = 2026-09-29 14:06:41 UTC
 ```
 
-That estimate holds only while majority is continuous. If support drops to 80% or less, the ledger clears the majority time and the two weeks start over. The network applies the check on flag ledgers (every 256 ledgers, on the order of 15 minutes), so the second on the card is not the exact ledger that flips the amendment on.
+That estimate holds only while majority is continuous. If support drops to 80% or less, the ledger clears the majority time and the two weeks start over. The network applies the check on flag ledgers (every 256 ledgers, on the order of 15 minutes), so the second on the page is not the exact ledger that flips the amendment on.
 
 Official description: [Amendments](https://xrpl.org/docs/concepts/networks-and-servers/amendments).
 
