@@ -23,6 +23,7 @@ const REFRESH_MS = 60000;
 
 const statusEl = document.querySelector("#status");
 const appEl = document.querySelector("#app");
+const belowEl = document.querySelector("#below");
 const refreshBtn = document.querySelector("#refresh");
 
 let refreshing = false;
@@ -73,22 +74,27 @@ async function refresh() {
   if (refreshing) return;
   refreshing = true;
   refreshBtn.disabled = true;
-  refreshBtn.textContent = "Refreshing…";
+  refreshBtn.textContent = "refreshing…";
   try {
     const data = await loadAmendments();
     snapshot = data;
     lastFetchMs = Date.now();
     render(data);
     const when = chicagoFormat.format(new Date(lastFetchMs));
-    const ledger = data.ledgerIndex ? ` · ledger ${data.ledgerIndex.toLocaleString("en-US")}` : "";
-    statusEl.textContent = `Last refreshed ${when}${ledger} · ${labelEndpoint(data.endpoint)} · auto-refreshes about every 60s`;
+    setStamp([
+      "cobblr labs",
+      labelEndpoint(data.endpoint),
+      data.ledgerIndex ? `ledger ${data.ledgerIndex.toLocaleString("en-US")}` : "ledger unavailable",
+      `refreshed ${when}`,
+    ]);
   } catch (error) {
-    statusEl.textContent = "Last refresh failed.";
+    setStamp(["cobblr labs", "last refresh failed"]);
     appEl.replaceChildren(errorBox(error));
+    belowEl.replaceChildren();
   } finally {
     refreshing = false;
     refreshBtn.disabled = false;
-    refreshBtn.textContent = "Refresh";
+    refreshBtn.textContent = "refresh";
   }
 }
 
@@ -233,21 +239,34 @@ function wsRpc(url, payload) {
 
 function render(data) {
   const grouped = groupAmendments(data.amendments);
-  const root = document.createElement("div");
-  root.className = "stack";
+  const hero = document.createDocumentFragment();
 
   if (location.protocol === "file:") {
     const note = document.createElement("p");
-    note.className = "rule";
-    note.textContent = "Opened as a file. If the cluster blocks this, serve the folder with python3 -m http.server 8080 and use http://127.0.0.1:8080/.";
-    root.append(note);
+    note.className = "file-note";
+    note.textContent = "Opened as a file. If the cluster blocks this, serve the folder with python3 -m http.server 8080.";
+    hero.append(note);
   }
 
-  root.append(sectionMajority(grouped.majority, data));
-  root.append(sectionVoting(grouped.voting));
-  root.append(sectionQuiet(grouped.quiet));
-  root.append(sectionEnabled(grouped.enabledWatch));
-  appEl.replaceChildren(root);
+  if (grouped.majority.length === 0) {
+    hero.append(emptyHero());
+  } else {
+    hero.append(heroReceipt(grouped.majority[0], data));
+    if (grouped.majority.length > 1) {
+      hero.append(alsoBlock(grouped.majority.slice(1), data));
+    }
+  }
+
+  appEl.replaceChildren(hero);
+
+  const below = document.createDocumentFragment();
+  const labeledMath = grouped.majority.length > 1;
+  for (const item of grouped.majority) below.append(mathDetails(item, labeledMath));
+  below.append(caveats());
+  below.append(sectionVoting(grouped.voting));
+  below.append(sectionQuiet(grouped.quiet));
+  below.append(sectionEnabled(grouped.enabledWatch));
+  belowEl.replaceChildren(below);
   paintCountdowns();
 }
 
@@ -271,89 +290,131 @@ function groupAmendments(amendments) {
     }
   }
 
-  majority.sort((a, b) => a.majority - b.majority || a.name.localeCompare(b.name));
+  majority.sort((a, b) => {
+    return Number(isHighlight(b.name)) - Number(isHighlight(a.name))
+      || a.majority - b.majority
+      || a.name.localeCompare(b.name);
+  });
   voting.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  quiet.sort((a, b) => Number(isHighlight(b.name)) - Number(isHighlight(a.name)) || a.name.localeCompare(b.name));
+  quiet.sort((a, b) => a.name.localeCompare(b.name));
   enabledWatch.sort((a, b) => a.name.localeCompare(b.name));
   return { majority, voting, quiet, enabledWatch };
 }
 
-function sectionMajority(items, data) {
+function heroReceipt(item, data) {
+  const article = document.createElement("article");
+  article.className = "receipt";
+  article.append(amendmentTitle(item.name, "h2"));
+  if (!item.supported) article.append(unsupportedNote());
+  article.append(countdownBlock(item));
+  article.append(timeFacts(item));
+  article.append(checkList(item, data));
+  return article;
+}
+
+function emptyHero() {
+  const article = document.createElement("article");
+  article.className = "receipt empty-hero";
+  const title = amendmentTitle("Nothing in majority.", "h2");
+  const state = document.createElement("p");
+  state.className = "state";
+  state.textContent = "No amendment is on the 14-day clock.";
+  article.append(title, state);
+  return article;
+}
+
+function alsoBlock(items, data) {
   const section = document.createElement("section");
-  section.append(head("In majority", String(items.length)));
-  const rule = document.createElement("p");
-  rule.className = "rule";
-  rule.textContent = "More than 80% for 14 continuous days, then it can enable. The date is an estimate: majority time plus 14 × 24 × 3600 seconds. Support at or below 80% clears that timestamp and the clock starts over. The network checks on flag ledgers, about every 15 minutes.";
-  section.append(rule);
-
-  if (items.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "empty";
-    empty.textContent = "No amendment currently has majority without being enabled.";
-    section.append(empty);
-    return section;
-  }
-
-  const stack = document.createElement("div");
-  stack.className = "stack";
-  for (const item of items) stack.append(majorityCard(item, data));
-  section.append(stack);
+  section.className = "also";
+  const title = document.createElement("h3");
+  title.textContent = "also in majority";
+  section.append(title);
+  for (const item of items) section.append(alsoItem(item, data));
   return section;
 }
 
-function majorityCard(item, data) {
-  const card = document.createElement("article");
-  card.className = isHighlight(item.name) ? "card watch" : "card";
-
-  const top = document.createElement("div");
-  top.className = "card-top";
-  const name = document.createElement("h3");
-  name.className = "amendment-name";
+function alsoItem(item, data) {
+  const article = document.createElement("article");
+  article.className = "also-item";
+  const name = document.createElement("h4");
   name.textContent = item.name;
-  top.append(name);
-  if (isHighlight(item.name)) {
-    const pill = document.createElement("span");
-    pill.className = "pill";
-    pill.textContent = "Watch";
-    top.append(pill);
+  article.append(name);
+  if (!item.supported) article.append(unsupportedNote());
+  const times = majorityTimes(item.majority);
+  const count = document.createElement("p");
+  count.className = "countdown-small";
+  count.dataset.enableAt = String(times.enableMs);
+  article.append(count);
+  article.append(alsoTime("since", times.majorityMs));
+  article.append(alsoTime("enable", times.enableMs));
+  if (item.count != null || item.threshold != null || item.validations != null) {
+    const votes = document.createElement("p");
+    votes.className = "also-meta";
+    votes.textContent = `votes ${voteText(item)}`;
+    article.append(votes);
   }
-  card.append(top);
+  const ledger = ledgerCheck(item, data);
+  const note = document.createElement("p");
+  note.className = ledger.warn ? "also-meta warn-text" : "also-meta";
+  note.textContent = ledger.text;
+  article.append(note);
+  return article;
+}
 
-  const kicker = document.createElement("p");
-  kicker.className = "card-kicker";
-  kicker.textContent = item.supported
-    ? "In majority · not enabled yet"
-    : "In majority · this server does not support the code";
-  card.append(kicker);
+function alsoTime(label, ms) {
+  const line = document.createElement("p");
+  line.className = "also-meta";
+  line.textContent = `${label} ${chicagoFormat.format(new Date(ms))} · ${utcFormat.format(new Date(ms))}`;
+  return line;
+}
 
+function amendmentTitle(text, tag) {
+  const name = document.createElement(tag);
+  name.className = tag === "h2" ? "amendment" : "";
+  name.textContent = text;
+  return name;
+}
+
+function unsupportedNote() {
+  const state = document.createElement("p");
+  state.className = "state warn-text";
+  state.textContent = "This server does not support the code.";
+  return state;
+}
+
+function countdownBlock(item) {
+  const times = majorityTimes(item.majority);
+  const wrap = document.createElement("div");
+  wrap.className = "countdown-block";
+  const count = document.createElement("p");
+  count.className = "countdown";
+  count.dataset.enableAt = String(times.enableMs);
+  const note = document.createElement("p");
+  note.className = "hold";
+  note.textContent = "if majority holds";
+  wrap.append(count, note);
+  return wrap;
+}
+
+function timeFacts(item) {
   const times = majorityTimes(item.majority);
   const facts = document.createElement("dl");
   facts.className = "facts";
-  facts.append(fact("Majority since", timeBlock(times.majorityMs)));
-  const remain = document.createElement("div");
-  const remainStrong = document.createElement("strong");
-  remainStrong.className = "remain";
-  remainStrong.dataset.enableAt = String(times.enableMs);
-  remain.append(remainStrong);
-  const remainNote = document.createElement("span");
-  remainNote.className = "remain-note";
-  remainNote.textContent = " if majority holds the whole time";
-  remain.append(remainNote);
-  facts.append(fact("Estimated enable", timeBlock(times.enableMs)));
-  facts.append(fact("Countdown", remain));
-  facts.append(fact("Votes", voteNode(item)));
-  facts.append(fact("Ledger check", ledgerCheckNode(item, data)));
-  card.append(facts);
-  card.append(mathDetails(item));
-  return card;
+  facts.append(fact("majority since", timeBlock(times.majorityMs)));
+  facts.append(fact("estimated enable", timeBlock(times.enableMs)));
+  return facts;
 }
 
-function mathDetails(item) {
-  const details = document.createElement("details");
-  details.className = "math";
-  const summary = document.createElement("summary");
-  summary.textContent = "Arithmetic";
-  details.append(summary);
+function checkList(item, data) {
+  const checks = document.createElement("ul");
+  checks.className = "checks";
+  checks.append(check("votes", voteText(item), false));
+  const ledger = ledgerCheck(item, data);
+  checks.append(check("ledger", ledger.text, ledger.warn));
+  return checks;
+}
+
+function mathDetails(item, labeled) {
   const pre = document.createElement("pre");
   const majorityUnix = item.majority + RIPPLE_TO_UNIX_SEC;
   const enableUnix = majorityUnix + MAJORITY_WINDOW_SEC;
@@ -367,119 +428,86 @@ function mathDetails(item) {
     "Ripple epoch is 2000-01-01 00:00:00 UTC.",
     "A lost majority deletes this timestamp. The next gain starts a new 14 days.",
   ].join("\n");
-  details.append(pre);
-  return details;
+  const label = labeled ? `arithmetic · ${item.name}` : "arithmetic";
+  return fold(label, pre);
+}
+
+function caveats() {
+  return fold(
+    "caveats",
+    paragraph("More than 80% for 14 continuous days, then it can enable. The date is majority time plus 14 × 24 × 3600 seconds. At or below 80% the timestamp is cleared and the clock starts over."),
+    paragraph("The network checks on flag ledgers, about every 15 minutes. The second here is not the exact ledger that flips it on."),
+    paragraph("Silence is not a yes. Only explicit votes count. count, threshold, and validations show up when a server is scoring UNL validations. This public cluster usually leaves them out. A missing count is not zero."),
+    paragraph("The page reads the public feature API about every 60 seconds and checks majority against Amendments ledger CloseTime."),
+  );
 }
 
 function sectionVoting(items) {
-  const section = document.createElement("section");
-  section.append(head("Voting", String(items.length)));
-  const rule = document.createElement("p");
-  rule.className = "rule";
-  rule.textContent = "Not enabled, no majority timestamp, and a vote count above zero.";
-  section.append(rule);
   if (items.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "empty";
-    empty.textContent = "None right now. This public cluster also omits vote counts on most amendments, so a real minority vote can be indistinguishable from a parked one until a count is published.";
-    section.append(empty);
-    return section;
+    return fold("voting · 0", paragraph("None with a published count."));
   }
-  const stack = document.createElement("div");
-  stack.className = "stack";
+  const list = document.createElement("ul");
+  list.className = "ledger-list";
   for (const item of items) {
-    const card = document.createElement("article");
-    card.className = isHighlight(item.name) ? "card watch" : "card";
-    const row = document.createElement("div");
-    row.className = "vote-row";
-    const name = document.createElement("h3");
-    name.className = "amendment-name";
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    name.className = "ledger-name";
     name.textContent = item.name;
-    const count = document.createElement("p");
-    count.className = "vote";
+    const count = document.createElement("span");
+    count.className = "ledger-count";
     count.textContent = voteText(item);
-    row.append(name, count);
-    card.append(row);
-    stack.append(card);
+    li.append(name, count);
+    list.append(li);
   }
-  section.append(stack);
-  return section;
+  return fold(`voting · ${items.length}`, list);
 }
 
 function sectionQuiet(items) {
-  const details = document.createElement("details");
-  details.className = "panel";
-  const summary = document.createElement("summary");
-  const headRow = document.createElement("span");
-  headRow.className = "section-head";
-  const title = document.createElement("h2");
-  title.textContent = "Quiet / parked";
-  const count = document.createElement("span");
-  count.className = "section-count";
-  count.textContent = `${items.length} not enabled`;
-  headRow.append(title, count);
-  summary.append(headRow);
-  details.append(summary);
-
-  const body = document.createElement("div");
-  body.className = "panel-body";
-  const rule = document.createElement("p");
-  rule.className = "rule";
-  rule.textContent = "Known to this server, not enabled, and either showing a zero vote count or no count at all. Enabled amendments are left out of this list.";
-  body.append(rule);
   const list = document.createElement("ul");
   list.className = "name-list";
   for (const item of items) {
     const li = document.createElement("li");
     li.textContent = item.name;
-    if (isHighlight(item.name) || isKeywordWatch(item.name)) {
-      const tag = document.createElement("span");
-      tag.className = "tag";
-      tag.textContent = "watch";
-      li.append(tag);
-    }
     list.append(li);
   }
-  body.append(list);
-  details.append(body);
-  return details;
+  return fold(
+    `quiet / parked · ${items.length}`,
+    paragraph("Known to this server, not enabled, count zero or missing."),
+    list,
+  );
 }
 
 function sectionEnabled(items) {
-  const section = document.createElement("section");
-  section.append(head("Enabled · name watch", String(items.length)));
-  const rule = document.createElement("p");
-  rule.className = "rule";
-  rule.textContent = "Already enabled. This API does not say when. Shown only when the name matches Batch, Permission, Credentials, or Delegation — not the full enabled set.";
-  section.append(rule);
+  const note = paragraph("Already enabled. Batch, Permission, Credentials, or Delegation in the name. No enable time in this API.");
   if (items.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "empty";
-    empty.textContent = "No enabled amendment matched those names.";
-    section.append(empty);
-    return section;
+    return fold("enabled · 0", note, paragraph("None of those names are enabled."));
   }
   const list = document.createElement("ul");
-  list.className = "enabled-list";
+  list.className = "name-list";
   for (const item of items) {
     const li = document.createElement("li");
     li.textContent = item.name;
     list.append(li);
   }
-  section.append(list);
-  return section;
+  return fold(`enabled · ${items.length}`, note, list);
 }
 
-function head(titleText, countText) {
-  const row = document.createElement("div");
-  row.className = "section-head";
-  const title = document.createElement("h2");
-  title.textContent = titleText;
-  const count = document.createElement("span");
-  count.className = "section-count";
-  count.textContent = countText;
-  row.append(title, count);
-  return row;
+function fold(summaryText, ...nodes) {
+  const details = document.createElement("details");
+  details.className = "fold";
+  const summary = document.createElement("summary");
+  summary.textContent = summaryText;
+  const body = document.createElement("div");
+  body.className = "fold-body";
+  body.append(...nodes);
+  details.append(summary, body);
+  return details;
+}
+
+function paragraph(text) {
+  const p = document.createElement("p");
+  p.textContent = text;
+  return p;
 }
 
 function fact(label, valueNode) {
@@ -504,45 +532,42 @@ function timeBlock(ms) {
   return wrap;
 }
 
-function voteNode(item) {
-  const p = document.createElement("p");
-  p.className = "vote";
-  p.textContent = voteText(item);
-  return p;
-}
-
 function voteText(item) {
   if (item.count == null && item.threshold == null && item.validations == null) {
-    return "Not in this response. count, threshold, and validations show up when a server is scoring UNL validations. This public cluster usually leaves them out.";
+    return "not in this response";
   }
   const parts = [];
   if (item.count != null && item.threshold != null) {
     parts.push(`${item.count} / ${item.threshold} threshold`);
   } else if (item.count != null) {
-    parts.push(`${item.count} yes votes`);
+    parts.push(`${item.count} yes`);
   }
   if (item.validations != null) parts.push(`${item.validations} validations`);
   return parts.join(" · ");
 }
 
-function ledgerCheckNode(item, data) {
-  const p = document.createElement("p");
-  p.className = "vote";
-  if (data.ledgerNote) {
-    p.textContent = data.ledgerNote;
-    return p;
-  }
+function ledgerCheck(item, data) {
+  if (data.ledgerNote) return { text: data.ledgerNote, warn: true };
   const closeTime = data.closeTimes.get(item.id.toUpperCase());
   if (closeTime == null) {
-    p.textContent = "No matching CloseTime on the Amendments ledger Majorities list.";
-    return p;
+    return { text: "No matching CloseTime on the Amendments ledger.", warn: true };
   }
   if (closeTime === item.majority) {
-    p.textContent = `Matches Amendments ledger CloseTime ${fmt(closeTime)} (Ripple epoch).`;
-    return p;
+    return { text: `CloseTime ${fmt(closeTime)} matches`, warn: false };
   }
-  p.textContent = `Disagreement: feature majority ${fmt(item.majority)}, ledger CloseTime ${fmt(closeTime)}.`;
-  return p;
+  return {
+    text: `Disagreement: feature majority ${fmt(item.majority)}, CloseTime ${fmt(closeTime)}.`,
+    warn: true,
+  };
+}
+
+function check(label, text, warn) {
+  const li = document.createElement("li");
+  if (warn) li.className = "warn";
+  const key = document.createElement("span");
+  key.textContent = label;
+  li.append(key, document.createTextNode(text));
+  return li;
 }
 
 function errorBox(error) {
@@ -556,15 +581,14 @@ function errorBox(error) {
 function paintCountdowns() {
   const now = Date.now();
   for (const node of document.querySelectorAll("[data-enable-at]")) {
-    const target = Number(node.dataset.enableAt);
-    node.textContent = formatRemaining(target - now);
+    const delta = Number(node.dataset.enableAt) - now;
+    node.textContent = formatRemaining(delta);
+    node.classList.toggle("elapsed", delta <= 0);
   }
 }
 
 function formatRemaining(deltaMs) {
-  if (deltaMs <= 0) {
-    return "14-day window has elapsed";
-  }
+  if (deltaMs <= 0) return "14-day window has elapsed";
   const totalMinutes = Math.floor(deltaMs / 60000);
   const days = Math.floor(totalMinutes / (60 * 24));
   const hours = Math.floor((totalMinutes - days * 60 * 24) / 60);
@@ -594,6 +618,15 @@ function labelEndpoint(endpoint) {
   } catch (error) {
     return endpoint;
   }
+}
+
+function setStamp(parts) {
+  const fragment = document.createDocumentFragment();
+  parts.forEach((part, index) => {
+    if (index > 0) fragment.append(document.createTextNode(" · "));
+    fragment.append(document.createTextNode(part));
+  });
+  statusEl.replaceChildren(fragment);
 }
 
 function fmt(value) {
